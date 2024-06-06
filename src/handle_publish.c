@@ -258,7 +258,6 @@ int handle__publish(struct mosquitto *context)
 		}
 		/* Ensure final payload is always zero terminated, this is the reason for the extra byte above */
 		((uint8_t *)msg->payload)[msg->payloadlen+63] = 0;
-		log__printf(NULL, MOSQ_LOG_DEBUG, "initial payload len is %u", msg->payloadlen);
 
 		if(packet__read_bytes(&context->in_packet, tmp_msg, msg->payloadlen)){ // store message in tmp_msg
 			db__msg_store_free(msg);
@@ -277,7 +276,6 @@ int handle__publish(struct mosquitto *context)
 		
 		// Concatenate the time and the origin payload
 		sprintf(new_json_str, "{\"time\":\"%ld\",\"data\":%s}", current_time, json_str);
-		log__printf(NULL, MOSQ_LOG_DEBUG, "merged json is from %s to %s with len %u", json_str, (char*)new_json_str, (uint32_t)strlen(new_json_str));
 		
 		// Now we have a combined string in 'new_json_str'
 		memcpy(msg->payload, new_json_str, (size_t)strlen(new_json_str));
