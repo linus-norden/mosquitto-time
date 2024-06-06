@@ -32,7 +32,7 @@ Contributors:
 #include "send_mosq.h"
 #include "sys_tree.h"
 #include "util_mosq.h"
-
+#include <time.h> // to be able to fetch actual ts upon insert
 
 int handle__publish(struct mosquitto *context)
 {
@@ -230,20 +230,62 @@ int handle__publish(struct mosquitto *context)
 			reason_code = MQTT_RC_PACKET_TOO_LARGE;
 			goto process_bad_message;
 		}
-		msg->payload = mosquitto__malloc(msg->payloadlen+1);
+		
+		/* encapsulation with of payload with {time=now(),data=payload} */
+		// Get the current time
+		time_t current_time;
+		time(&current_time);
+
+		// Create a new string to contain the time and the original JSON payload
+		char *new_json_str = mosquitto__malloc(msg->payloadlen + 64); // Additional space for "time" field and separators
+		if (new_json_str == NULL) {
+			fprintf(stderr, "Memory allocation failed\n");
+			exit(1);
+		}
+
+		// Create a new string to contain the original message
+		char *tmp_msg = mosquitto__malloc(msg->payloadlen); 
+		if (tmp_msg == NULL) {
+			fprintf(stderr, "Memory allocation failed\n");
+			exit(1);
+		}
+
+		// default memory allocation for final message payload
+		msg->payload = mosquitto__malloc(msg->payloadlen+64); // Additional space for "time" field and separators ( was: msg->payload = mosquitto__malloc(msg->payloadlen+1); )
 		if(msg->payload == NULL){
 			db__msg_store_free(msg);
 			return MOSQ_ERR_NOMEM;
 		}
-		/* Ensure payload is always zero terminated, this is the reason for the extra byte above */
-		((uint8_t *)msg->payload)[msg->payloadlen] = 0;
+		/* Ensure final payload is always zero terminated, this is the reason for the extra byte above */
+		((uint8_t *)msg->payload)[msg->payloadlen+63] = 0;
+		log__printf(NULL, MOSQ_LOG_DEBUG, "initial payload len is %u", msg->payloadlen);
 
-		if(packet__read_bytes(&context->in_packet, msg->payload, msg->payloadlen)){
+		if(packet__read_bytes(&context->in_packet, tmp_msg, msg->payloadlen)){ // store message in tmp_msg
 			db__msg_store_free(msg);
+			mosquitto_free(new_json_str); // clean up on error.
+                        mosquitto_free(tmp_msg);
 			return MOSQ_ERR_MALFORMED_PACKET;
 		}
-	}
+               //trminate string!!
+                //(uint8_t *)tmp_msg[msg->payloadlen] = 0;
+		
+		/* Ensure payload is always zero terminated */
+		((uint8_t *)tmp_msg)[msg->payloadlen] = 0;
 
+		// Cast the payload void pointer to a char pointer for easy manipulation
+		char *json_str = (char *)tmp_msg;
+		
+		// Concatenate the time and the origin payload
+		sprintf(new_json_str, "{\"time\":\"%ld\",\"data\":%s}", current_time, json_str);
+		log__printf(NULL, MOSQ_LOG_DEBUG, "merged json is from %s to %s with len %u", json_str, (char*)new_json_str, (uint32_t)strlen(new_json_str));
+		
+		// Now we have a combined string in 'new_json_str'
+		memcpy(msg->payload, new_json_str, (size_t)strlen(new_json_str));
+        msg->payloadlen = (uint32_t)strlen(new_json_str);
+        mosquitto_free(new_json_str); // clean up on error.
+		mosquitto_free(tmp_msg);	
+		
+	}
 	/* Check for topic access */
 	rc = mosquitto_acl_check(context, msg->topic, msg->payloadlen, msg->payload, msg->qos, msg->retain, MOSQ_ACL_WRITE);
 	if(rc == MOSQ_ERR_ACL_DENIED){
@@ -389,4 +431,3 @@ process_bad_message:
 	}
 	return rc;
 }
-
