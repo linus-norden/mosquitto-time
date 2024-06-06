@@ -6,6 +6,12 @@ and 3.1 of the MQTT protocol. It also includes a C and C++ client library, and
 the `mosquitto_pub` and `mosquitto_sub` utilities for publishing and
 subscribing.
 
+## Fork information
+mosquitto_time is intended to 
+- add UNIX timestamps to every publish
+- convert published information into a fixed json format
+- resulting structure processed as message will contain 'time' for the timestamp and 'data' for the original content
+
 ## Links
 
 See the following links for more information on MQTT:
